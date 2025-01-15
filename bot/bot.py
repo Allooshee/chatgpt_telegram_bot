@@ -94,7 +94,7 @@ async def register_user_if_not_exists(update: Update, context: CallbackContext, 
     n_used_tokens = db.get_user_attribute(user.id, "n_used_tokens")
     if isinstance(n_used_tokens, int) or isinstance(n_used_tokens, float):  # old format
         new_n_used_tokens = {
-            "gpt-3.5-turbo": {
+            "gpt-4o-mini": {
                 "n_input_tokens": 0,
                 "n_output_tokens": n_used_tokens
             }
@@ -324,7 +324,7 @@ async def _vision_message_handle_fn(
 
     except Exception as e:
         error_text = f"Something went wrong during completion. Reason: {e}"
-        logger.error(error_text)
+        logger.error(error_text, exc_info=True)
         await update.message.reply_text(error_text)
         return
 
@@ -446,7 +446,7 @@ async def message_handle(update: Update, context: CallbackContext, message=None,
 
         except Exception as e:
             error_text = f"Something went wrong during completion. Reason: {e}"
-            logger.error(error_text)
+            logger.error(error_text, exc_info=True)
             await update.message.reply_text(error_text)
             return
 
@@ -566,7 +566,7 @@ async def new_dialog_handle(update: Update, context: CallbackContext):
 
     user_id = update.message.from_user.id
     db.set_user_attribute(user_id, "last_interaction", datetime.now())
-    db.set_user_attribute(user_id, "current_model", "gpt-3.5-turbo")
+    db.set_user_attribute(user_id, "current_model", "gpt-4o-mini")
 
     db.start_new_dialog(user_id)
     await update.message.reply_text("Starting new dialog ✅")

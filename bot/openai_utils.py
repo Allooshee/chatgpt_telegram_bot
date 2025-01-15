@@ -25,8 +25,9 @@ OPENAI_COMPLETION_OPTIONS = {
 
 
 class ChatGPT:
-    def __init__(self, model="gpt-3.5-turbo"):
-        assert model in {"text-davinci-003", "gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4", "gpt-4o", "gpt-4-1106-preview", "gpt-4-vision-preview"}, f"Unknown model: {model}"
+    def __init__(self, model="gpt-4o-mini"):
+        self.models_lst = ["gpt-4o","gpt-4o-mini"] 
+        assert model in self.models_lst, f"Unknown model: {model}"
         self.model = model
 
     async def send_message(self, message, dialog_messages=[], chat_mode="assistant"):
@@ -37,7 +38,7 @@ class ChatGPT:
         answer = None
         while answer is None:
             try:
-                if self.model in {"gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4", "gpt-4o", "gpt-4-1106-preview", "gpt-4-vision-preview"}:
+                if self.model in {"gpt-4o","gpt-4o-mini"}:
                     messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
 
                     r = await openai.ChatCompletion.acreate(
@@ -46,14 +47,14 @@ class ChatGPT:
                         **OPENAI_COMPLETION_OPTIONS
                     )
                     answer = r.choices[0].message["content"]
-                elif self.model == "text-davinci-003":
-                    prompt = self._generate_prompt(message, dialog_messages, chat_mode)
-                    r = await openai.Completion.acreate(
-                        engine=self.model,
-                        prompt=prompt,
+                elif self.model in {"o1-preview","o1-mini"}:
+                    messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)[1:]
+                    r = await openai.ChatCompletion.acreate(
+                        model=self.model,
+                        messages=messages,
                         **OPENAI_COMPLETION_OPTIONS
                     )
-                    answer = r.choices[0].text
+                    answer = r.choices[0].message["content"]
                 else:
                     raise ValueError(f"Unknown model: {self.model}")
 
@@ -78,44 +79,28 @@ class ChatGPT:
         answer = None
         while answer is None:
             try:
-                if self.model in {"gpt-3.5-turbo-16k", "gpt-3.5-turbo", "gpt-4","gpt-4o", "gpt-4-1106-preview"}:
+                if self.model in {"gpt-4o","gpt-4o-mini"}:
                     messages = self._generate_prompt_messages(message, dialog_messages, chat_mode)
+                  
+                r_gen = await openai.ChatCompletion.acreate(
+                    model=self.model,
+                    messages=messages,
+                    stream=True,
+                    **OPENAI_COMPLETION_OPTIONS
+                )
 
-                    r_gen = await openai.ChatCompletion.acreate(
-                        model=self.model,
-                        messages=messages,
-                        stream=True,
-                        **OPENAI_COMPLETION_OPTIONS
-                    )
+                answer = ""
+                async for r_item in r_gen:
+                    delta = r_item.choices[0].delta
 
-                    answer = ""
-                    async for r_item in r_gen:
-                        delta = r_item.choices[0].delta
+                    if "content" in delta:
+                        answer += delta.content
+                        n_input_tokens, n_output_tokens = self._count_tokens_from_messages(messages, answer, model=self.model)
+                        n_first_dialog_messages_removed = 0
 
-                        if "content" in delta:
-                            answer += delta.content
-                            n_input_tokens, n_output_tokens = self._count_tokens_from_messages(messages, answer, model=self.model)
-                            n_first_dialog_messages_removed = 0
-
-                            yield "not_finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
-                            
-
-                elif self.model == "text-davinci-003":
-                    prompt = self._generate_prompt(message, dialog_messages, chat_mode)
-                    r_gen = await openai.Completion.acreate(
-                        engine=self.model,
-                        prompt=prompt,
-                        stream=True,
-                        **OPENAI_COMPLETION_OPTIONS
-                    )
-
-                    answer = ""
-                    async for r_item in r_gen:
-                        answer += r_item.choices[0].text
-                        n_input_tokens, n_output_tokens = self._count_tokens_from_prompt(prompt, answer, model=self.model)
-                        n_first_dialog_messages_removed = n_dialog_messages_before - len(dialog_messages)
                         yield "not_finished", answer, (n_input_tokens, n_output_tokens), n_first_dialog_messages_removed
-
+                        
+              
                 answer = self._postprocess_answer(answer)
 
             except openai.error.InvalidRequestError as e:  # too many tokens
@@ -253,7 +238,7 @@ class ChatGPT:
     def _generate_prompt_messages(self, message, dialog_messages, chat_mode, image_buffer: BytesIO = None):
         prompt = config.chat_modes[chat_mode]["prompt_start"]
 
-        messages = [{"role": "system", "content": prompt}]
+        messages = [{"role": "developer", "content": prompt}]
         
         for dialog_message in dialog_messages:
             messages.append({"role": "user", "content": dialog_message["user"]})
@@ -289,7 +274,7 @@ class ChatGPT:
         answer = answer.strip()
         return answer
 
-    def _count_tokens_from_messages(self, messages, answer, model="gpt-3.5-turbo"):
+    def _count_tokens_from_messages(self, messages, answer, model="gpt-4o-mini"):
         encoding = tiktoken.encoding_for_model(model)
 
         if model == "gpt-3.5-turbo-16k":
@@ -311,7 +296,9 @@ class ChatGPT:
             tokens_per_message = 3
             tokens_per_name = 1
         else:
-            raise ValueError(f"Unknown model: {model}")
+            tokens_per_message = 3
+            tokens_per_name = 1
+            # raise ValueError(f"Unknown model: {model}")
 
         # input
         n_input_tokens = 0
@@ -339,7 +326,7 @@ class ChatGPT:
 
         return n_input_tokens, n_output_tokens
 
-    def _count_tokens_from_prompt(self, prompt, answer, model="text-davinci-003"):
+    def _count_tokens_from_prompt(self, prompt, answer, model="gpt-4o-mini"):
         encoding = tiktoken.encoding_for_model(model)
 
         n_input_tokens = len(encoding.encode(prompt)) + 1
